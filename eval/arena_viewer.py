@@ -164,17 +164,134 @@ INDEX_HTML = """<!doctype html>
       aspect-ratio: 16/9;
       border: 0;
       background: #070d17;
-      flex: 1;
     }
-    .hint {
-      padding: 10px 16px;
-      color: var(--muted);
+
+    /* Damage Representation Panel (ở dưới arena) */
+    .damage-panel {
+      padding: 12px 16px;
+      background: #091220;
       border-top: 1px solid var(--line);
-      font-size: 13px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .damage-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      background: #091220;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .damage-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      letter-spacing: .04em;
+    }
+    .damage-summary {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .stat-pill {
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      background: #111d31;
+      border: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .stat-pill.taken { color: var(--danger); background: rgba(248, 113, 113, 0.12); border-color: rgba(248, 113, 113, 0.35); }
+    .stat-pill.dealt { color: var(--you); background: rgba(52, 211, 153, 0.12); border-color: rgba(52, 211, 153, 0.35); }
+    .stat-pill.net { color: var(--accent-hover); background: rgba(14, 165, 233, 0.12); border-color: rgba(14, 165, 233, 0.35); }
+    .stat-pill.def-rate { color: #cbd5e1; }
+    
+    .damage-rounds-scroll {
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+    .damage-rounds-scroll::-webkit-scrollbar { height: 6px; }
+    .damage-rounds-scroll::-webkit-scrollbar-thumb { background: #1f3657; border-radius: 3px; }
+    .damage-rounds-track {
+      display: flex;
+      gap: 10px;
+      min-width: max-content;
+    }
+    .dmg-round-card {
+      min-width: 145px;
+      padding: 9px 11px;
+      border-radius: 8px;
+      background: #0d1a2c;
+      border: 1px solid #1a2f4d;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      transition: all .15s ease;
+    }
+    .dmg-round-card:hover {
+      border-color: var(--accent-hover);
+      transform: translateY(-1px);
+      background: #12223a;
+    }
+    .dmg-round-card.round-win { border-left: 3px solid var(--you); }
+    .dmg-round-card.round-loss { border-left: 3px solid var(--danger); }
+    .dmg-round-card.round-draw { border-left: 3px solid var(--draw); }
+
+    .dmg-card-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .dmg-r-num { color: #94a3b8; letter-spacing: .05em; }
+    .dmg-r-state { font-size: 10px; }
+    .dmg-hp-state {
+      font-family: ui-monospace, monospace;
+      font-size: 12px;
+      color: var(--text);
+      background: #060e1a;
+      padding: 3px 6px;
+      border-radius: 4px;
+      text-align: center;
+      border: 1px solid #14233a;
+    }
+    .dmg-row {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .dmg-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+    }
+    .dmg-label { color: var(--muted); }
+    .dmg-val.took { color: var(--danger); font-weight: 600; }
+    .dmg-val.dealt { color: var(--you); font-weight: 600; }
+    .dmg-bar-wrap {
+      height: 4px;
+      background: #17263c;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .dmg-bar.took { height: 100%; background: var(--danger); }
+    .dmg-bar.dealt { height: 100%; background: var(--you); }
+
+    .hint {
+      padding: 9px 16px;
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+      font-size: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #060d17;
     }
     .side {
       display: flex;
@@ -310,12 +427,6 @@ INDEX_HTML = """<!doctype html>
       align-items: center;
       gap: 6px;
     }
-    .card-badge {
-      font-size: 10px;
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-weight: 700;
-    }
     .card-bottom {
       display: flex;
       justify-content: space-between;
@@ -409,8 +520,29 @@ INDEX_HTML = """<!doctype html>
   <main>
     <section class="arena-wrap">
       <iframe id="arena" title="COLOSSEUM Arena Replay"></iframe>
+
+      <!-- Phần biểu diễn máu nhận và gây ra ở dưới rõ ràng -->
+      <div class="damage-panel" id="damagePanel">
+        <div class="damage-header">
+          <div class="damage-title">
+            <span>📊</span>
+            <span>BIỂU DIỄN MÁU NHẬN & GÂY RA TỪNG HIỆP:</span>
+          </div>
+          <div class="damage-summary" id="damageSummary">
+            <span class="stat-pill taken">🩸 Tổng máu nhận: <strong id="totalTook">0 HP</strong></span>
+            <span class="stat-pill dealt">⚔ Tổng sát thương gây: <strong id="totalDealt">0 HP</strong></span>
+            <span class="stat-pill net">⚖ Chênh lệch: <strong id="netDamage">+0 HP</strong></span>
+            <span class="stat-pill def-rate">🛡 Thủ sạch: <strong id="cleanDefenseRate">100%</strong></span>
+          </div>
+        </div>
+
+        <div class="damage-rounds-scroll">
+          <div class="damage-rounds-track" id="damageRoundsTrack"></div>
+        </div>
+      </div>
+
       <div class="hint">
-        <span>🎮 <strong>Điều khiển:</strong> Trong khung đấu, dùng thanh timeline để Play/Pause, tua trận và chọn tốc độ 1× / 2× / 8×.</span>
+        <span>🎮 <strong>Điều khiển:</strong> Dùng timeline để Play/Pause, tua trận và chọn tốc độ 1× / 2× / 8×. Đã tắt màn xám che hiệp.</span>
         <span id="currentDuelLabel" style="color:var(--accent-hover);font-weight:600;">—</span>
       </div>
     </section>
@@ -586,6 +718,81 @@ INDEX_HTML = """<!doctype html>
       }
     }
 
+    function renderDamageTimeline(run) {
+      const track = document.querySelector('#damageRoundsTrack');
+      track.replaceChildren();
+
+      const summary = run.summary || [];
+      let totalTook = 0;
+      let totalDealt = 0;
+      let cleanDefRounds = 0;
+
+      for (const row of summary) {
+        const took = row.took || 0;
+        const dealt = row.dealt || 0;
+        totalTook += took;
+        totalDealt += dealt;
+        if (took === 0) cleanDefRounds++;
+      }
+
+      const net = totalDealt - totalTook;
+      const defRate = summary.length ? Math.round((cleanDefRounds / summary.length) * 100) : 100;
+
+      document.querySelector('#totalTook').textContent = `-${totalTook} HP`;
+      document.querySelector('#totalDealt').textContent = `+${totalDealt} HP`;
+      const netEl = document.querySelector('#netDamage');
+      netEl.textContent = `${net >= 0 ? '+' : ''}${net} HP`;
+      netEl.style.color = net >= 0 ? 'var(--you)' : 'var(--danger)';
+      document.querySelector('#cleanDefenseRate').textContent = `${defRate}% (${cleanDefRounds}/${summary.length})`;
+
+      if (!summary.length) {
+        track.innerHTML = '<div class="empty" style="padding:10px;">Chưa có dữ liệu hiệp đấu.</div>';
+        return;
+      }
+
+      for (const row of summary) {
+        const took = row.took || 0;
+        const dealt = row.dealt || 0;
+        const tookPct = Math.min(100, Math.round((took / 25) * 100));
+        const dealtPct = Math.min(100, Math.round((dealt / 25) * 100));
+        
+        const winRound = dealt > took;
+        const lossRound = took > dealt;
+        const borderClass = winRound ? 'round-win' : (lossRound ? 'round-loss' : 'round-draw');
+
+        const card = document.createElement('div');
+        card.className = `dmg-round-card ${borderClass}`;
+        card.innerHTML = `
+          <div class="dmg-card-head">
+            <span class="dmg-r-num">HIỆP ${row.round}</span>
+            <span class="dmg-r-state">${winRound ? '🟢 Thắng' : (lossRound ? '🔴 Thua' : '⚪ Hòa')}</span>
+          </div>
+          <div class="dmg-hp-state">HP: <strong>${row.hp_you}</strong> – <strong>${row.hp_bot}</strong></div>
+          
+          <div class="dmg-row">
+            <div class="dmg-meta">
+              <span class="dmg-label">🩸 Nhận:</span>
+              <span class="dmg-val took">${took > 0 ? `-${took} HP` : '0 HP (Đỡ sạch)'}</span>
+            </div>
+            <div class="dmg-bar-wrap">
+              <div class="dmg-bar took" style="width:${tookPct}%;"></div>
+            </div>
+          </div>
+
+          <div class="dmg-row">
+            <div class="dmg-meta">
+              <span class="dmg-label">⚔ Gây:</span>
+              <span class="dmg-val dealt">${dealt > 0 ? `+${dealt} HP` : '0 HP'}</span>
+            </div>
+            <div class="dmg-bar-wrap">
+              <div class="dmg-bar dealt" style="width:${dealtPct}%;"></div>
+            </div>
+          </div>
+        `;
+        track.append(card);
+      }
+    }
+
     function renderRounds(run) {
       const table = document.querySelector('#roundsTable');
       table.replaceChildren();
@@ -628,6 +835,7 @@ INDEX_HTML = """<!doctype html>
 
       renderRounds(run);
       renderCards();
+      renderDamageTimeline(run);
 
       // Ensure cache-busting timestamp so iframe fully reloads even when same match is selected
       const replay = `/runs/${encodeURIComponent(run.name)}/events.jsonl`;
@@ -683,7 +891,6 @@ INDEX_HTML = """<!doctype html>
     // Modal Create Match
     const modal = document.querySelector('#modalBackdrop');
     document.querySelector('#btnNewMatch').onclick = () => {
-      // Suggest next seed
       const currentSeed = current?.seed || 1;
       document.querySelector('#seedInput').value = currentSeed + 1;
       modal.classList.add('open');
@@ -827,7 +1034,22 @@ class Handler(BaseHTTPRequestHandler):
             if not ARENA_HTML.is_file():
                 self._json({"error": "arena UI is not built"}, 404)
                 return
-            self._send(ARENA_HTML.read_bytes(), "text/html; charset=utf-8")
+            html_text = ARENA_HTML.read_text(encoding="utf-8")
+            # 1. Bỏ trang xám che kín màn hình giữa các round (drawReveal)
+            html_text = html_text.replace(
+                "function drawReveal(state, t) {",
+                "function drawReveal(state, t) {\n  return; // Đã bỏ trang xám che màn hình liên tục\n",
+            )
+            # 2. Thêm nhãn hướng dẫn rõ ràng ở 2 dải phòng thủ / tấn công dưới đáy canvas
+            html_text = html_text.replace(
+                "`${labelFor(YOU)} DEFENDS`, COLORS.sideA, 1);",
+                "`${labelFor(YOU)} DEFENDS (PHÒNG THỦ — MÁU BẠN NHẬN)`, COLORS.sideA, 1);",
+            )
+            html_text = html_text.replace(
+                "`${labelFor(OPPONENT)} DEFENDS`, COLORS.sideB, 1);",
+                "`${labelFor(OPPONENT)} DEFENDS (TẤN CÔNG — SÁT THƯƠNG BẠN GÂY)`, COLORS.sideB, 1);",
+            )
+            self._send(html_text.encode("utf-8"), "text/html; charset=utf-8")
             return
         if parsed.path == "/api/runs":
             self._json(list_runs())

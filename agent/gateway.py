@@ -460,6 +460,14 @@ class Gateway:
         if headers.get("x-card-signature") in {"unvouched", "invalid", "forged"}:
             return self.deny(cmd, "agent card signature is invalid")
 
+        aud = headers.get("aud")
+        if aud is not None:
+            if server not in self._A2A_SERVERS and "-" not in server:
+                return self.deny(cmd, "mcp command must not carry an audience header")
+            if aud != server:
+                return self.deny(cmd, "delegation audience does not match the target peer")
+
+
         successor = successor_of(server, tool)
         if successor is not None:
             server, tool = successor
@@ -517,7 +525,7 @@ class Gateway:
             if tool not in set(card.get("skills") or ()):
                 return self.deny(cmd, "requested skill is not declared by the verified Agent Card")
             aud = headers.get("aud", "")
-            if aud not in {server, f"a2a:{server}", f"mcp:{server}"}:
+            if aud != server:
                 return self.deny(cmd, "delegation audience does not match the target peer")
             delegated_act = args.get("act") or args.get("learner") or args.get("learner_id")
             if delegated_act and self._normalise_identity(delegated_act) != self._normalise_identity(getattr(self.ctx, "act", "")):

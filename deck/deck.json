@@ -130,7 +130,7 @@
    "class": "schema_bomb",
    "invariant": "catalog_result_bounded",
    "success_event": "context_budget_exhausted_by_catalog_read",
-   "defense_event": "gateway.budget_held",
+   "defense_event": "gateway.denied",
    "mutation": {
     "target": "mcp:registry",
     "op": "inflate_catalog",
