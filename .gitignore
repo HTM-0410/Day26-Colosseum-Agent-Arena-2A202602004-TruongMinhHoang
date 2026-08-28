@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 .pytest_cache/
 submissions/*.bundle
+!submissions/TruongMinhHoang.bundle
 runs/
 kit/world/*/
 !kit/world/*.py

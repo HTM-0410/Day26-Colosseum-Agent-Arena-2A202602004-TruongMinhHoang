@@ -22,8 +22,10 @@ from typing import Any, Callable
 from agent.gateway import Command, Gateway
 from agent.guardrails import (
     check_grounding,
+    collect_exchange_evidence,
     redact,
     safe_answer_or_abstain,
+    safe_answer_from_trace,
     scan_for_injected_instructions,
     validate_answer,
     verify_arithmetic,
@@ -217,6 +219,80 @@ def check_guardrails() -> None:
     _assert(abstained.abstained and abstained.safe, "unsafe draft must become an abstention")
 
 
+def check_trace_answer_policy() -> None:
+    """An anchor absent from this exchange's tool results must not survive."""
+
+    ask = {"type": "which_day_covers", "require": ["course_day", "track", "anchor"]}
+    raw_fabricated = 0
+    guarded_fabricated = 0
+    repaired = 0
+    for seed in range(1, 31):
+        for round_no in range(1, 11):
+            anchor = f"Frame:{seed:04x}{round_no:04x}/w/{round_no:03d}"
+            fake = f"Frame:dead{seed:04x}/w/999"
+            include_fake = (seed * 37 + round_no * 17) % 100 < 35
+            cited = [anchor, *([fake] if include_fake else [])]
+            raw_fabricated += int(include_fake)
+            trace = [
+                {"type": "exchange_start", "p": {"ask": ask}},
+                {
+                    "type": "tool_result",
+                    "p": {
+                        "anchors": [anchor],
+                        "course_day": 26,
+                        "track": "P2T2",
+                        "body": "Course day 26, track P2T2.",
+                    },
+                },
+                {"type": "answer", "p": {}},
+            ]
+            result = safe_answer_from_trace(
+                {
+                    "text": "Course day 26, track P2T2.",
+                    "cited_anchors": cited,
+                    "course_day": 26,
+                    "track": "P2T2",
+                    "anchor": anchor,
+                },
+                ask,
+                trace,
+            )
+            output_citations = tuple(result.answer.get("cited_anchors") or ())
+            ledger = collect_exchange_evidence(trace)
+            guarded_fabricated += sum(citation not in ledger.retrieved_anchors for citation in output_citations)
+            repaired += int("unsupported_citation_removed" in result.issues)
+            _assert(result.safe and not result.abstained, f"supported answer was lost at seed={seed}, round={round_no}")
+
+    _assert(raw_fabricated > 0, "adversarial battery did not inject any fabricated citation")
+    _assert(repaired == raw_fabricated, "not every injected citation was reported as removed")
+    _assert(guarded_fabricated == 0, "a fabricated citation survived trace-native finalisation")
+
+    old_anchor = "Frame:11111111/w/001"
+    current_anchor = "Frame:22222222/w/002"
+    cross_exchange = [
+        {"type": "exchange_start", "p": {"ask": ask}},
+        {"type": "tool_result", "p": {"anchors": [old_anchor], "body": "course day 25 track P2T1"}},
+        {"type": "exchange_end", "p": {}},
+        {"type": "exchange_start", "p": {"ask": ask, "anchor": old_anchor}},
+        {"type": "command", "p": {"args": {"anchor": old_anchor}}},
+        {"type": "tool_result", "p": {"anchors": [current_anchor], "body": "course day 26 track P2T2"}},
+        {"type": "answer", "p": {}},
+    ]
+    rejected_old = safe_answer_from_trace(
+        {
+            "text": "Course day 25, track P2T1.",
+            "cited_anchors": [old_anchor],
+            "course_day": 25,
+            "track": "P2T1",
+            "anchor": old_anchor,
+        },
+        ask,
+        cross_exchange,
+    )
+    _assert(rejected_old.abstained, "an anchor from a previous exchange was accepted")
+    _assert(old_anchor not in rejected_old.answer.get("cited_anchors", ()), "old anchor survived abstention")
+
+
 def check_prosecutor() -> None:
     fixtures = load_fixtures()
     report = score_prosecutor(prosecute, fixtures)
@@ -270,6 +346,7 @@ def main() -> int:
     suite.check("gateway.attack_matrix", check_gateway_attacks)
     suite.check("gateway.write_safety", check_gateway_writes)
     suite.check("guardrails.answer_policy", check_guardrails)
+    suite.check("guardrails.trace_answer_policy_30_seed", check_trace_answer_policy)
     suite.check("prosecutor.standard_fixtures", check_prosecutor)
     suite.check("prompt.eight_task_routes", check_prompt_routes)
     suite.check("viewer.match_and_replay_contract", check_viewer_contract)

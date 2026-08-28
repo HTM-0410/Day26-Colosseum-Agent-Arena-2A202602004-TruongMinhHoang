@@ -58,6 +58,9 @@ __all__ = [
     "AnswerSafetyResult",
     "validate_answer",
     "safe_answer_or_abstain",
+    "ExchangeEvidence",
+    "collect_exchange_evidence",
+    "safe_answer_from_trace",
 ]
 
 
@@ -375,6 +378,148 @@ def safe_answer_or_abstain(
         abstained=True,
         answer=abstention,
         issues=checked.issues,
+        grounding=checked.grounding,
+    )
+
+
+# ---------------------------------------------------------------------------
+# 6. TRACE-NATIVE FINALISATION.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class ExchangeEvidence:
+    """Evidence the agent actually received in the current exchange only."""
+
+    retrieved_anchors: tuple[str, ...]
+    evidence_texts: tuple[str, ...]
+    private_values: tuple[str, ...]
+
+
+def _unique(values: Iterable[str]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(value for value in values if value))
+
+
+def _scalar_texts(value: Any) -> Iterable[str]:
+    """Yield scalar evidence recursively without interpreting its meaning."""
+
+    if isinstance(value, Mapping):
+        for nested in value.values():
+            yield from _scalar_texts(nested)
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        for nested in value:
+            yield from _scalar_texts(nested)
+    elif isinstance(value, str):
+        if value.strip():
+            yield value
+    elif isinstance(value, (int, float, Decimal)) and not isinstance(value, bool):
+        yield str(value)
+
+
+def collect_exchange_evidence(trace: Iterable[Mapping[str, Any]]) -> ExchangeEvidence:
+    """Build an evidence ledger from the final exchange in an L1 trace.
+
+    Only ``tool_result`` events after the last ``exchange_start`` and before
+    the final ``answer`` are eligible. Command arguments, previous rounds,
+    mutation payloads and anchors merely named in the question never enter
+    the ledger. This boundary is what prevents a plausible remembered anchor
+    from becoming a fabricated citation.
+    """
+
+    events = [event for event in trace if isinstance(event, Mapping)]
+    answer_at = next(
+        (index for index in range(len(events) - 1, -1, -1) if events[index].get("type") == "answer"),
+        len(events),
+    )
+    start_at = next(
+        (
+            index
+            for index in range(answer_at - 1, -1, -1)
+            if events[index].get("type") == "exchange_start"
+        ),
+        -1,
+    )
+
+    anchors: list[str] = []
+    evidence: list[str] = []
+    private: list[str] = []
+    for event in events[start_at + 1 : answer_at]:
+        if event.get("type") != "tool_result":
+            continue
+        payload = event.get("p")
+        if not isinstance(payload, Mapping):
+            continue
+
+        returned = payload.get("anchors") or ()
+        if isinstance(returned, str):
+            returned = (returned,)
+        event_anchors: list[str] = []
+        if isinstance(returned, Iterable):
+            event_anchors.extend(value for value in returned if isinstance(value, str))
+        single = payload.get("anchor")
+        if isinstance(single, str):
+            event_anchors.append(single)
+        anchors.extend(event_anchors)
+
+        payload_texts = list(_scalar_texts(payload))
+        evidence.extend(payload_texts)
+        if any(anchor.lower().startswith(("note:", "learner:")) for anchor in event_anchors):
+            private.extend(text for text in payload_texts if len(" ".join(text.split())) >= 40)
+
+    return ExchangeEvidence(
+        retrieved_anchors=_unique(anchors),
+        evidence_texts=_unique(evidence),
+        private_values=_unique(private),
+    )
+
+
+def safe_answer_from_trace(
+    answer: Mapping[str, Any],
+    ask: Mapping[str, Any],
+    trace: Iterable[Mapping[str, Any]],
+    *,
+    conflicting: bool = False,
+) -> AnswerSafetyResult:
+    """Finalise an ANSWER against the current exchange's real tool results.
+
+    Unsupported citations are removed before validation. If that leaves no
+    citation, breaks a required ``anchor`` field, or exposes any other safety
+    issue, the whole draft becomes a structured abstention. The function
+    never replaces an unsupported fact with a guessed one.
+    """
+
+    ledger = collect_exchange_evidence(trace)
+    retrieved = frozenset(ledger.retrieved_anchors)
+    candidate = dict(answer)
+    original = candidate.get("cited_anchors") or ()
+    if not isinstance(original, (list, tuple, set, frozenset)):
+        original = ()
+    original_citations = tuple(original)
+    supported = [anchor for anchor in original_citations if isinstance(anchor, str) and anchor in retrieved]
+    removed = len(supported) != len(original_citations)
+    candidate["cited_anchors"] = supported
+
+    required = {str(field) for field in (ask.get("require") or ())}
+    if "anchor" in required:
+        answer_anchor = candidate.get("anchor")
+        if not isinstance(answer_anchor, str) or answer_anchor not in supported:
+            candidate["anchor"] = ""
+
+    checked = safe_answer_or_abstain(
+        candidate,
+        ask,
+        retrieved_anchors=ledger.retrieved_anchors,
+        evidence_texts=ledger.evidence_texts,
+        private_values=ledger.private_values,
+        conflicting=conflicting,
+    )
+    if not removed:
+        return checked
+    return AnswerSafetyResult(
+        safe=checked.safe,
+        abstained=checked.abstained,
+        answer=checked.answer,
+        issues=_unique(("unsupported_citation_removed", *checked.issues)),
         grounding=checked.grounding,
     )
 
