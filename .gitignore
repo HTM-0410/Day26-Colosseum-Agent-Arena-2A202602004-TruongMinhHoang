@@ -6,4 +6,5 @@ submissions/*.bundle
 runs/
 kit/world/*/
 !kit/world/*.py
+colosseum-world-*-data/
 *.local.json

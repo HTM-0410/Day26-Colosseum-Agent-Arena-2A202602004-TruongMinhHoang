@@ -18,7 +18,33 @@ def prosecute(trace: list[dict], answer: dict, card: dict) -> dict:
     """Return {"v": 1, "claims": [...]}. SYNCHRONOUS, no I/O, no network, 5 s deadline."""
 ```
 
-## What's already here
+## Bot match viewer
+
+`eval/arena_viewer.py` adds a student-owned replay dashboard without modifying
+the hash-protected `kit/arena_ui/` implementation. It discovers every
+`runs/spar-<bot>-<seed>/` directory, shows the final score and round-by-round
+damage, and embeds the provided pixel arena in replay mode. The embedded arena
+therefore retains its native Play/Pause, seek, and 1×/2×/8× controls.
+
+```powershell
+py -3.12 spar.py --bot rookie --as all --seed 1 --ui --quiet
+py -3.12 spar.py --bot operator --as all --seed 1 --ui --quiet
+py -3.12 spar.py --bot adversary --as all --seed 1 --ui --quiet
+py -3.12 -m eval.challenge_match --seed 2 --run-name challenge-mirror-2
+py -3.12 -m eval.arena_viewer --port 8766
+```
+
+Open `http://localhost:8766/`, choose a bot/seed from the selector, then use
+`Xem lại từ đầu` or the timeline inside the arena. The viewer validates run
+names before resolving files and binds only to `127.0.0.1`.
+
+`eval.challenge_match` creates a deliberately difficult self-play simulation:
+both sides use the submitted Gateway, prosecutor, deck, and lineup under the
+same deterministic MockBroker. It writes both L1 traces and both sides' claim
+outcomes, so the replay contains no artificial `(waiting)` row. The UI labels
+it `MIRROR CHALLENGER`; it is never presented as a real external student team.
+
+## What is implemented
 
 | Piece | What it does |
 |---|---|
@@ -27,36 +53,28 @@ def prosecute(trace: list[dict], answer: dict, card: dict) -> dict:
 | `group_calls(trace)` | Buckets the L1 trace into per-`command` groups (`command`/`decision`/`enforced`/`tool_call`/`tool_result`/`mutations`) — the correlation almost every detector needs. |
 | `split_sentences(text)` | The exact `answer.span:N` split. |
 | `ProsecutionBudget` | A claim accumulator. `try_add(...)` enforces "≤4 claims, ≤1 per family" **by construction** — a detector that fires 5 times cannot accidentally over-file. Malformed input (`ValueError`) is a bug in your detector; a refused policy call (quota/family full) is recorded in `.dropped`, not an error. |
-| `detect_enforcement_failure` | **The one competently-implemented detector.** Read it before writing your own — it is the template. |
-| 16 named `_hook_*` stubs | One per remaining class, each a `return []` with a docstring naming exactly what CONTRACTS.md §6.4 (or the class's own definition, for the 8 adjudicated classes) says it needs. |
+| `detect_enforcement_failure` | Evidence-pairs a mutation-bearing command with the enforced verdict, only for cards whose declared defence is `gateway.denied`. |
+| 16 named `_hook_*` detectors | Evidence-first coverage for every remaining class; mechanical defects cite call groups and semantic defects cite the delivered answer event or exact spans. |
 | `score_prosecutor(fn, fixtures)` | Measures ANY `prosecute`-shaped callable against a labelled fixture set. Run it against your own work before you ever point it at an opponent. |
 
-## Why only one detector ships
+## Detection policy
 
-`enforcement_failure` (weight **10**, the heaviest class) is also the most mechanical: CONTRACTS.md
-§6.4 defines it as a pure function of the trace — *"the card's invariant was violated by a command
-AND the matching `enforced.verdict_applied != 'deny'`"* — no text to read, no judgement call. Study
-`detect_enforcement_failure`'s shape (group calls → scan for the predicate → cite the command +
-`enforced` pair together) and reuse it. The 9 deterministic classes (CONTRACTS.md §6.3) are all
-reachable this way; the 8 adjudicated classes (`ungrounded`, `hallucination`, `guardrail_breach`,
-`unflagged_conflict`, `incoherent`, `overreach`, `non_responsive`, `unsupported_precision`) need
-reading the answer's actual meaning — a real referee sends those to one blind model call
-(`referee/adjudicate.py`, arena-only); your own detector can still flag a plausible instance and let
-the claim's `argument` make the case.
+The prosecutor never treats missing evidence as guilt. It groups every command with its decision,
+enforcement, call, result, and mutations, then files at most one claim per family. Deterministic
+classes require affirmative event predicates. Semantic classes use narrow signatures such as an
+unsupported number, an exact private substring, or contradictory answer spans; the arena's blind
+adjudicator still makes the final semantic ruling.
 
 ## Developing your own detector
 
-1. Pick a stub in `_HOOKS` (say `_hook_wasteful`). Read its docstring — it names the CONTRACTS.md
-   rule it must implement, and honestly says what a trace-only prosecutor can and cannot reach.
-2. Implement it returning `[(evidence_refs, argument), ...]`, same shape as
-   `detect_enforcement_failure`.
-3. Wire it into `prosecute()`'s loop (add its calls to `budget.try_add(...)`, same pattern as the
-   `enforcement_failure` block above the loop).
-4. Rerun `score_prosecutor` and watch your `recall` for that class move off 0.0 — and watch
-   `false_claim_rate` and `precision` to make sure you did not trade recall for false claims.
+1. Add positive, near-miss, and clean cases before broadening a heuristic.
+2. Cite the smallest sufficient event/span set.
+3. Rerun the standard fixture scorer and `python -m eval.benchmark`.
+4. Reject changes that increase false claims merely to gain recall.
 
 ```bash
-python -m eval.prosecute            # scores the starter against fixtures/prosecution/labelled/
+python -m eval.prosecute            # scores all 17 detectors on 40 labelled fixtures
+python -m eval.benchmark            # world + gateway + guardrails + prosecutor + prompt
 python -m pytest tests/test_prosecute.py -v
 ```
 
@@ -89,16 +107,15 @@ bug in your code, not a measurement of detection quality, but they are still cou
 An `unproven` claim counts toward neither precision's nor recall's numerator — CONTRACTS.md §6.2
 pays it exactly 0 either way, so this mirrors the real economics.
 
-Running the starter (which implements exactly 1 of 17 classes) prints roughly:
+The completed detector set currently prints:
 
 ```
-precision: 1.000   recall: 0.059   f1: 0.111   false_claim_rate: 0.000
+precision: 1.000   recall: 1.000   f1: 1.000   false_claim_rate: 0.000
 ```
 
-**That shape is correct, not a bug to fix**: perfect precision (it never guesses wrong when it does
-file) and low recall (16 of 17 classes are still stubs). If your own numbers ever show HIGH recall
-before you've implemented anything, something is wrong with your changes — check you did not
-accidentally turn a stub into something that always fires.
+These are fixture metrics, not a promise of identical performance on unseen semantic traces. The
+acceptance suite also checks clean content, attack variants, replay determinism, gateway policy,
+guardrails, real-world integrity, and prompt task coverage independently.
 
 ## The fixture set — `fixtures/prosecution/labelled/`
 

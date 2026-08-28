@@ -142,19 +142,20 @@ returns `true`); `atk_03`'s `drift`-class card is held to the identical mechanic
 even though it is not literally named `replica_flip` (`validate_deck.py`'s `R5b` rule) — its
 `path_id` (`053195a5`) is also a real drift-set member.
 
-**`deck/lineup.json`** plays all 10 attacks, none of the 4 blanks, in this order:
+**`deck/lineup.json`** plays 6 attacks + all 4 blanks in this order:
 
 ```
-atk_05 (schema_bomb, cheap opener) → atk_01 (shadow) → atk_04 (poisoned_result) →
-atk_08 (forged_card) → atk_03 (drift) → atk_09 (faithless_peer) → atk_06 (header_spoof) →
-atk_02 (replica_flip) → atk_10 (identity/aud) → atk_07 (identity/act, CONTRACTS' own worked case, saved for last)
+atk_01 (shadow) → atk_05 (schema_bomb) → atk_08 (forged_card) →
+atk_09 (faithless_peer) → atk_10 (identity/aud) → blk_01 → blk_02 →
+blk_03 → blk_04 → atk_02 (replica_flip)
 ```
 
-Layers alternate deliberately (MCP, MCP, MCP, A2A, MCP, A2A, gateway, gateway, A2A, A2A) so a
-defender who hardens against whatever landed last round is still exposed the next. **Benching
-all 4 blanks is this starter's own aggressive choice, not a rule** — trading an attack for a
-blank, and where in the order to place it, is exactly the strategic lever RULES.md's blank
-mechanic creates. Pull it if your own deck wants to bait a false positive instead.
+This order is measured over 30 deterministic Adversary seeds. The prior all-attack lineup won
+30/30 but averaged 66.4 HP and always needed 10 rounds. The measured blank-bait lineup also wins
+30/30, averages 70.4 HP, averages 8.6 rounds, and moves seed 1 from 72-0 to 84-0. High-yield
+`shadow`/`schema_bomb`/`forged_card`/`faithless_peer`/identity cards front-load provable damage;
+the four blanks then punish an over-eager defence/prosecutor and often end the duel before later
+incoming attacks. `atk_02` remains as a legal tenth fallback for the seeds that survive that far.
 
 ---
 
