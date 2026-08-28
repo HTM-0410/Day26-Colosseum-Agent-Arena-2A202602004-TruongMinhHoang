@@ -276,7 +276,7 @@
    },
    "trigger": {
     "on": "call_index",
-    "gte": 2
+    "gte": 1
    }
   },
   {
